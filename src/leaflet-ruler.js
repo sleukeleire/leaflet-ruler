@@ -13,6 +13,9 @@
   L.Control.Ruler = L.Control.extend({
     options: {
       position: 'topright',
+      events: {
+        onToggle: function (is_active) { }
+      },
       circleMarker: {
         color: 'red',
         radius: 2
@@ -21,16 +24,19 @@
         color: 'red',
         dashArray: '1,6'
       },
-      lengthUnit: {
+      lengthUnits: [{
         display: 'km',
         decimal: 2,
         factor: null
-      },
+      }],
       angleUnit: {
         display: '&deg;',
         decimal: 2,
         factor: null
       }
+    },
+    isActive: function () {
+      return this._choice;
     },
     onAdd: function(map) {
       this._map = map;
@@ -48,9 +54,14 @@
     },
     _toggleMeasure: function() {
       this._choice = !this._choice;
+      this.options.events.onToggle(this._choice);
       this._clickedLatLong = null;
       this._clickedPoints = [];
-      this._totalLength = 0;
+      this._totalLength = [];
+      for (var i = 0; i < this.options.lengthUnits.length; i++) {
+        this._totalLength[i] = 0;
+      }
+
       if (this._choice){
         this._map.doubleClickZoom.disable();
         L.DomEvent.on(this._map._container, 'keydown', this._escape, this);
@@ -86,15 +97,12 @@
         if (this._movingLatLong){
           L.polyline([this._clickedPoints[this._clickCount-1], this._movingLatLong], this.options.lineStyle).addTo(this._polylineLayer);
         }
-        var text;
-        this._totalLength += this._result.Distance;
-        if (this._clickCount > 1){
-          text = '<b>' + 'Bearing:' + '</b>&nbsp;' + this._result.Bearing.toFixed(this.options.angleUnit.decimal) + '&nbsp;' + this.options.angleUnit.display + '<br><b>' + 'Distance:' + '</b>&nbsp;' + this._totalLength.toFixed(this.options.lengthUnit.decimal) + '&nbsp;' +  this.options.lengthUnit.display;
+
+        for (var i = 0; i < this.options.lengthUnits.length; i++) {
+          this._totalLength[i] += this._result.Distance[i];
         }
-        else {
-          text = '<b>' + 'Bearing:' + '</b>&nbsp;' + this._result.Bearing.toFixed(this.options.angleUnit.decimal) + '&nbsp;' + this.options.angleUnit.display + '<br><b>' + 'Distance:' + '</b>&nbsp;' + this._result.Distance.toFixed(this.options.lengthUnit.decimal) + '&nbsp;' +  this.options.lengthUnit.display;
-        }
-        L.circleMarker(this._clickedLatLong, this.options.circleMarker).bindTooltip(text, {permanent: true, className: 'result-tooltip'}).addTo(this._pointLayer).openTooltip();
+
+        L.circleMarker(this._clickedLatLong, this.options.circleMarker).bindTooltip(this._renderText(this._totalLength), {permanent: true, className: 'result-tooltip'}).addTo(this._pointLayer).openTooltip();
       }
       this._clickCount++;
     },
@@ -106,23 +114,37 @@
           this._map.removeLayer(this._tempLine);
           this._map.removeLayer(this._tempPoint);
         }
-        var text;
-        this._addedLength = 0;
         this._tempLine = L.featureGroup();
         this._tempPoint = L.featureGroup();
         this._tempLine.addTo(this._map);
         this._tempPoint.addTo(this._map);
         this._calculateBearingAndDistance();
-        this._addedLength = this._result.Distance + this._totalLength;
-        L.polyline([this._clickedLatLong, this._movingLatLong], this.options.lineStyle).addTo(this._tempLine);
-        if (this._clickCount > 1){
-          text = '<b>' + 'Bearing:' + '</b>&nbsp;' + this._result.Bearing.toFixed(this.options.angleUnit.decimal) + '&nbsp;' + this.options.angleUnit.display + '<br><b>' + 'Distance:' + '</b>&nbsp;' + this._addedLength.toFixed(this.options.lengthUnit.decimal) + '&nbsp;' +  this.options.lengthUnit.display + '<br><div class="plus-length">(+' + this._result.Distance.toFixed(this.options.lengthUnit.decimal) + ')</div>';
+        var  addedLength = [];
+        for (var i = 0; i < this.options.lengthUnits.length; i++) {
+          addedLength[i] = this._result.Distance[i] + this._totalLength[i];
         }
-        else {
-          text = '<b>' + 'Bearing:' + '</b>&nbsp;' + this._result.Bearing.toFixed(this.options.angleUnit.decimal) + '&nbsp;' + this.options.angleUnit.display + '<br><b>' + 'Distance:' + '</b>&nbsp;' + this._result.Distance.toFixed(this.options.lengthUnit.decimal) + '&nbsp;' +  this.options.lengthUnit.display;
+        L.polyline([this._clickedLatLong, this._movingLatLong], this.options.lineStyle).addTo(this._tempLine);
+        var text = this._renderText(addedLength);
+        if (this._clickCount > 1){
+          text += '<br><div class="plus-length">(+' + this._renderDistances(this._result.Distance) + ')</div>';
         }
         L.circleMarker(this._movingLatLong, this.options.circleMarker).bindTooltip(text, {sticky: true, offset: L.point(0, -40) ,className: 'moving-tooltip'}).addTo(this._tempPoint).openTooltip();
       }
+    },
+    _renderText: function(distance) {
+      var text;
+      text = '<b>' + 'Bearing:' + '</b>&nbsp;' + this._result.Bearing.toFixed(this.options.angleUnit.decimal) + '&nbsp;' + this.options.angleUnit.display + '<br><b>' + 'Distance:' + '</b>&nbsp;' + this._renderDistances(distance);
+      return text;
+    },
+    _renderDistances: function(distance) {
+      var text = '';
+      for (var i = 0; i < this.options.lengthUnits.length; i++) {
+        if (i >  0) {
+          text += ' / ';
+        }
+        text += distance[i].toFixed(this.options.lengthUnits[i].decimal) + '&nbsp;' + this.options.lengthUnits[i].display
+      }
+      return text;
     },
     _escape: function(e) {
       if (e.keyCode === 27){
@@ -145,12 +167,15 @@
       var brng = Math.atan2(y, x)*((this.options.angleUnit.factor ? this.options.angleUnit.factor/2 : 180)/Math.PI);
       brng += brng < 0 ? (this.options.angleUnit.factor ? this.options.angleUnit.factor : 360) : 0;
       // distance
-      var R = this.options.lengthUnit.factor ? 6371 * this.options.lengthUnit.factor : 6371; // kilometres
       var deltaF = (f2 - f1)*toRadian;
       var deltaL = (l2 - l1)*toRadian;
       var a = Math.sin(deltaF/2) * Math.sin(deltaF/2) + Math.cos(f1*toRadian) * Math.cos(f2*toRadian) * Math.sin(deltaL/2) * Math.sin(deltaL/2);
       var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      var distance = R * c;
+      var distance = [];
+      for (var i = 0; i < this.options.lengthUnits.length; i++) {
+        var R = this.options.lengthUnits[i].factor ? 6371 * this.options.lengthUnits[i].factor : 6371; // default is kilometres
+        distance[i] = R * c;
+      }
       this._result = {
         Bearing: brng,
         Distance: distance
